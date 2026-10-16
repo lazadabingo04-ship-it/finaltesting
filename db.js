@@ -7,16 +7,15 @@
   const api = (op, path, data) => post({ op, path, data, token: tok() });
   const sd = (id, d) => ({ id, exists: d != null, data: () => d || undefined });
   const qs = j => ({ docs: j.docs.map(d => sd(d.id, d.data)), size: j.docs.length, empty: !j.docs.length });
-  const pollers = new Set(), kick = () => pollers.forEach(f => f());
   function poll(fn, cb, err) {
-    let on = true, last = null, t = null;
-    const run = async () => { if (!on) return; clearTimeout(t); try { const s = await fn(); const j = JSON.stringify(s.docs ? s.docs.map(d => [d.id, d.data()]) : s.data()); if (j !== last) { last = j; cb(s); } } catch (e) { err && err(e); } if (on) t = setTimeout(run, 5000); };
-    pollers.add(run); run(); return () => { on = false; pollers.delete(run); };
+    let on = true, last = null;
+    const run = async () => { if (!on) return; try { const s = await fn(); const j = JSON.stringify(s.docs ? s.docs.map(d => [d.id, d.data()]) : s.data()); if (j !== last) { last = j; cb(s); } } catch (e) { err && err(e); } if (on) setTimeout(run, 5000); };
+    run(); return () => { on = false; };
   }
   const docRef = p => { const id = p.split("/").pop(); const get = async () => sd(id, (await api("get", p)).data);
-    return { id, path: p, get, set: async d => { await api("set", p, d); kick(); }, update: async d => { await api("update", p, d); kick(); }, delete: async () => { await api("delete", p); kick(); }, onSnapshot: (cb, er) => poll(get, cb, er) }; };
+    return { id, path: p, get, set: async d => { await api("set", p, d); }, update: async d => { await api("update", p, d); }, delete: async () => { await api("delete", p); }, onSnapshot: (cb, er) => poll(get, cb, er) }; };
   const colRef = p => { const get = async () => qs(await api("list", p));
-    return { path: p, doc: id => docRef(p + "/" + id), add: async d => { const j = await api("add", p, d); kick(); return docRef(p + "/" + j.id); }, get, onSnapshot: (cb, er) => poll(get, cb, er) }; };
+    return { path: p, doc: id => docRef(p + "/" + id), add: async d => docRef(p + "/" + (await api("add", p, d)).id), get, onSnapshot: (cb, er) => poll(get, cb, er) }; };
   window.claude = { use: async n => n === "db" ? { doc: docRef, collection: colRef } : n === "user" ? { canEdit: async () => !!tok(), isOwner: async () => !!tok(), id: async () => uid } : null };
   document.addEventListener("DOMContentLoaded", () => { const a = document.getElementById("staff"); if (a && tok()) a.textContent = "Log out"; });
   document.addEventListener("click", async e => {
@@ -26,7 +25,4 @@
     const j = await post({ op: "login", password: pw });
     if (j.ok) { sessionStorage.setItem("aiden_tok", j.token); location.reload(); } else alert("Wrong password");
   });
-  // let screens refresh right after a button press, and show real errors instead of failing silently
-  document.addEventListener("click", e => { if (e.target.tagName === "BUTTON") { try { document.activeElement.blur(); } catch (x) {} } }, true);
-  window.addEventListener("unhandledrejection", e => { const m = e.reason && e.reason.message || e.reason; if (m) alert("Something went wrong: " + m); });
 })();
